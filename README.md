@@ -1,101 +1,84 @@
-
-# 🎨 TINTA
+# TINTA
 
 **TINTA** — Tools for Inspiring New Tones & Art
 
-A professional-grade color extraction tool built with React and Vite. Extract accurate color palettes from any image using multiple advanced algorithms.
+A professional-grade color extraction tool that transforms images into beautiful, accurate color palettes. Features perceptual color algorithms, live UI preview, and palette manipulation tools.
 
-*TINTA* is the Filipino word for "ink" — the essential medium that brings art to life. Just as ink transforms blank paper into meaningful art, TINTA transforms your images into beautiful, usable color palettes.
+*TINTA* is the Filipino word for "ink" — the essential medium that brings art to life.
 
 ![Screenshot 2025-01-03 160332](https://github.com/user-attachments/assets/404d58b5-38e8-4cba-b21e-c8b314083bc8)
 
-🌐 **[Live Demo](https://tinta-extractor.vercel.app/)** — Try TINTA online now!
+**[Live Demo](https://tinta-extractor.vercel.app/)** — Try TINTA online now!
 
-## ✨ Features
+## Features
 
-### 🚀 **7 Advanced Algorithms**
-- **Vibrant (Enhanced)**: node-vibrant with optimized settings
-- **K-Means Clustering**: Machine learning with LAB color space
-- **Median-Cut**: Recursive color space splitting
-- **Octree Quantization**: Hierarchical color reduction
-- **Weighted K-Means**: Spatial-aware clustering
-- **Fast Average**: Quick single-color extraction
-- **Combined**: All algorithms in parallel for maximum accuracy
+### Color Extraction
+- **Perceptual Algorithm** — CIEDE2000 + OKLab color space for human-vision accuracy
+- **8 Extraction Methods** — Vibrant, K-Means, Median-Cut, Octree, Weighted K-Means, Fast Average, Combined, and Perceptual
+- **Smart Filtering** — Removes noise, duplicates, and invalid colors automatically
 
-### 🎯 **Smart Analysis**
-- **Perceptual Color Space**: LAB color space for human-vision accuracy
-- **Grayscale Detection**: Proper black & white image handling
-- **Color Validation**: Filters noise and invalid colors
-- **Multiple Formats**: HEX, RGB, HSL support
-- **Export Features**: JSON download with metadata
+### Live UI Preview
+- Preview your extracted palette in a real UI mockup
+- Toggle between light and dark mode
+- See how colors work together in buttons, cards, and text
 
-### 🛠️ **Image Processing**
-- **Smart Resizing**: Automatic optimization
-- **Blur Filter**: Noise reduction
-- **Contrast Enhancement**: Better color distinction
-- **Transparency Support**: PNG alpha channel handling
+### Palette Tools
+- **Tints & Shades** — Generate lighter and darker variations
+- **Gradients** — Create smooth transitions between colors
+- **Adjustments** — Fine-tune saturation and brightness
+- **Color Harmony** — View complementary, analogous, and triadic colors
 
-## 🛠️ **Technologies**
+### Export Options
+- Copy individual colors or entire palette
+- Multiple formats: HEX, RGB, HSL
+- Download as JSON with full metadata
 
-- **React 18** + **Vite** + **Tailwind CSS**
-- **node-vibrant** + **fast-average-color**
-- **Framer Motion** + **React Hot Toast**
-- **Custom Algorithms**: K-Means, Median-Cut, Octree, Weighted K-Means
-
-## 🚀 **Quick Start**
+## Quick Start
 
 ```bash
 # Install dependencies
-npm install
+pnpm install
 
 # Start development server
-npm run dev
+pnpm dev
 
 # Build for production
-npm run build
+pnpm build
 ```
 
-## 🎯 **Usage**
+## Usage
 
-1. **Upload Image**: Drag and drop or click to browse
-2. **Select Algorithm**: Choose from 7 extraction methods
-3. **Configure Settings**: Adjust preprocessing options
-4. **Extract Colors**: Get accurate color palettes
-5. **Export Results**: Copy colors or download as JSON
+1. **Upload** — Drag & drop, click to browse, or paste from clipboard (Ctrl+V)
+2. **Extract** — Colors are automatically extracted using perceptual algorithms
+3. **Explore** — Use palette tools to generate tints, shades, and gradients
+4. **Preview** — See your palette in the live UI preview
+5. **Export** — Copy colors or download the full palette
 
-### **Algorithm Guide**
-- **Combined**: Maximum accuracy (all algorithms)
-- **Vibrant**: Artistic images with bold colors
-- **K-Means**: Photos with distinct color regions
-- **Median-Cut**: Color quantization
-- **Octree**: Complex images with many variations
-- **Weighted K-Means**: Portraits and centered compositions
-- **Fast Average**: Quick single-color extraction
+## Tech Stack
 
-## 🔧 **Technical Features**
+- **React 18** + **Vite** + **Tailwind CSS**
+- **node-vibrant** + **fast-average-color**
+- **Framer Motion** for animations
+- **Custom algorithms**: CIEDE2000, OKLab, K-Means++
 
-- **LAB Color Space**: Perceptual accuracy with Delta E calculations
-- **Parallel Processing**: Multiple algorithms run simultaneously
-- **Smart Validation**: Filters noise and invalid colors
-- **Grayscale Detection**: Proper black & white image handling
-- **Memory Optimization**: Efficient processing with cleanup
+## Algorithm Guide
 
-## 📁 **Project Structure**
-```
-src/
-├── components/ImageColorAnalyzer.jsx
-├── index.css
-├── main.jsx
-└── App.jsx
-```
+| Algorithm | Best For |
+|-----------|----------|
+| Perceptual | Most accurate, human-vision optimized |
+| Combined | Maximum coverage, runs all methods |
+| Vibrant | Artistic images with bold colors |
+| K-Means | Photos with distinct color regions |
+| Weighted K-Means | Portraits, centered compositions |
+| Median-Cut | Color quantization tasks |
+| Octree | Complex images with many variations |
 
-## 📱 **Browser Support**
+## Browser Support
+
 Chrome 90+, Firefox 88+, Safari 14+, Edge 90+
 
 ---
 
-**Built with ❤️ for designers, developers, and color enthusiasts**
-
----
+**Built with care for designers, developers, and color enthusiasts**
 
 *TINTA* — Where every image becomes a palette of possibilities.
