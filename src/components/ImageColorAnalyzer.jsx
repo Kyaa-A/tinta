@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import * as Vibrant from "node-vibrant";
@@ -9,7 +9,7 @@ const ImageColorAnalyzer = () => {
   const [selectedImage, setSelectedImage] = useState(null);
   const [colorPalette, setColorPalette] = useState([]);
   const [colorAnalysis, setColorAnalysis] = useState(null);
-  const [extractionMethod, setExtractionMethod] = useState('vibrant');
+  const [extractionMethod, setExtractionMethod] = useState('perceptual');
   const [isProcessing, setIsProcessing] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [showControls, setShowControls] = useState(true);
@@ -23,6 +23,16 @@ const ImageColorAnalyzer = () => {
   });
   const [showColorAnalysis, setShowColorAnalysis] = useState(false);
   const [colorHistory, setColorHistory] = useState([]);
+
+  // New feature states
+  const [showUIPreview, setShowUIPreview] = useState(false);
+  const [previewMode, setPreviewMode] = useState('light'); // 'light' or 'dark'
+  const [showPaletteTools, setShowPaletteTools] = useState(false);
+  const [selectedColorForTools, setSelectedColorForTools] = useState(null);
+  const [paletteAdjustments, setPaletteAdjustments] = useState({ saturation: 0, brightness: 0 });
+  const [urlInput, setUrlInput] = useState('');
+  const [isExtractingUrl, setIsExtractingUrl] = useState(false);
+  const [isPasting, setIsPasting] = useState(false);
 
   // Color conversion utilities
   const hexToRgb = (hex) => {
@@ -108,11 +118,138 @@ const ImageColorAnalyzer = () => {
     const { r, g, b } = hexToRgb(hex);
     const hsl = rgbToHsl(r, g, b);
     const h = hsl.h;
-    
+
     const color1 = hslToHex((h + 120) % 360, hsl.s, hsl.l);
     const color2 = hslToHex((h + 240) % 360, hsl.s, hsl.l);
-    
+
     return [color1, color2];
+  };
+
+  // ============ PALETTE MANIPULATION FUNCTIONS ============
+
+  // Generate tints (lighter versions) of a color
+  const generateTints = (hex, count = 5) => {
+    const { r, g, b } = hexToRgb(hex);
+    const hsl = rgbToHsl(r, g, b);
+    const tints = [];
+
+    for (let i = 1; i <= count; i++) {
+      const newL = Math.min(95, hsl.l + (95 - hsl.l) * (i / count));
+      tints.push(hslToHex(hsl.h, hsl.s, newL));
+    }
+    return tints;
+  };
+
+  // Generate shades (darker versions) of a color
+  const generateShades = (hex, count = 5) => {
+    const { r, g, b } = hexToRgb(hex);
+    const hsl = rgbToHsl(r, g, b);
+    const shades = [];
+
+    for (let i = 1; i <= count; i++) {
+      const newL = Math.max(5, hsl.l - hsl.l * (i / count));
+      shades.push(hslToHex(hsl.h, hsl.s, newL));
+    }
+    return shades;
+  };
+
+  // Generate full tint/shade scale for a color
+  const generateColorScale = (hex) => {
+    const shades = generateShades(hex, 4).reverse();
+    const tints = generateTints(hex, 4);
+    return [...shades, hex, ...tints];
+  };
+
+  // Create gradient CSS between two colors
+  const createGradient = (color1, color2, direction = 'to right') => {
+    return `linear-gradient(${direction}, ${color1}, ${color2})`;
+  };
+
+  // Create multi-color gradient from palette
+  const createPaletteGradient = (colors, direction = 'to right') => {
+    return `linear-gradient(${direction}, ${colors.join(', ')})`;
+  };
+
+  // Adjust color saturation
+  const adjustSaturation = (hex, amount) => {
+    const { r, g, b } = hexToRgb(hex);
+    const hsl = rgbToHsl(r, g, b);
+    const newS = Math.max(0, Math.min(100, hsl.s + amount));
+    return hslToHex(hsl.h, newS, hsl.l);
+  };
+
+  // Adjust color brightness/lightness
+  const adjustBrightness = (hex, amount) => {
+    const { r, g, b } = hexToRgb(hex);
+    const hsl = rgbToHsl(r, g, b);
+    const newL = Math.max(0, Math.min(100, hsl.l + amount));
+    return hslToHex(hsl.h, hsl.s, newL);
+  };
+
+  // Apply adjustments to entire palette
+  const getAdjustedPalette = () => {
+    return colorPalette.map(color => {
+      let adjusted = color;
+      if (paletteAdjustments.saturation !== 0) {
+        adjusted = adjustSaturation(adjusted, paletteAdjustments.saturation);
+      }
+      if (paletteAdjustments.brightness !== 0) {
+        adjusted = adjustBrightness(adjusted, paletteAdjustments.brightness);
+      }
+      return adjusted;
+    });
+  };
+
+  // ============ PASTE FROM CLIPBOARD ============
+
+  const pasteFromClipboard = async () => {
+    setIsPasting(true);
+
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+
+      for (const item of clipboardItems) {
+        // Check for image types
+        const imageType = item.types.find(type => type.startsWith('image/'));
+
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          const file = new File([blob], 'pasted-image.png', { type: imageType });
+
+          // Process the pasted image
+          await processImageFile(file);
+
+          toast.success('Image pasted from clipboard!', {
+            icon: '📋',
+            style: { borderRadius: '10px', background: '#333', color: '#fff' },
+          });
+          return;
+        }
+      }
+
+      // No image found in clipboard
+      toast.error('No image found in clipboard. Try copying an image first!', {
+        icon: '📋',
+        style: { borderRadius: '10px', background: '#333', color: '#fff' },
+      });
+
+    } catch (error) {
+      console.error('Paste error:', error);
+
+      if (error.name === 'NotAllowedError') {
+        toast.error('Clipboard access denied. Please allow clipboard permissions.', {
+          icon: '🔒',
+          style: { borderRadius: '10px', background: '#333', color: '#fff' },
+        });
+      } else {
+        toast.error('Could not paste from clipboard. Try drag & drop instead.', {
+          icon: '❌',
+          style: { borderRadius: '10px', background: '#333', color: '#fff' },
+        });
+      }
+    } finally {
+      setIsPasting(false);
+    }
   };
 
   const analyzeColorPalette = (colors) => {
@@ -211,21 +348,20 @@ const ImageColorAnalyzer = () => {
     });
   };
 
-  // Advanced color distance calculation using perceptual color space
-  const colorDistance = (color1, color2) => {
+  // Advanced color distance calculation using CIEDE2000 (most perceptually accurate)
+  const colorDistance = (color1, color2, useCiede2000 = true) => {
     const rgb1 = hexToRgb(color1);
     const rgb2 = hexToRgb(color2);
-    
-    // Convert to LAB color space for perceptual accuracy
-    const lab1 = rgbToLab(rgb1.r, rgb1.g, rgb1.b);
-    const lab2 = rgbToLab(rgb2.r, rgb2.g, rgb2.b);
-    
-    // Calculate Delta E (CIE76) for perceptual color difference
-    const deltaL = lab1.l - lab2.l;
-    const deltaA = lab1.a - lab2.a;
-    const deltaB = lab1.b - lab2.b;
-    
-    return Math.sqrt(deltaL * deltaL + deltaA * deltaA + deltaB * deltaB);
+
+    if (useCiede2000) {
+      // Use CIEDE2000 for most accurate perceptual distance
+      const lab1 = rgbToLab(rgb1.r, rgb1.g, rgb1.b);
+      const lab2 = rgbToLab(rgb2.r, rgb2.g, rgb2.b);
+      return ciede2000(lab1, lab2);
+    } else {
+      // Use OKLab for faster but still accurate distance
+      return oklabDistance(rgb1, rgb2) * 100; // Scale to similar range as CIEDE2000
+    }
   };
 
   // Convert RGB to LAB color space for perceptual accuracy
@@ -255,6 +391,120 @@ const ImageColorAnalyzer = () => {
     const labB = 200 * (y - z);
 
     return { l, a, b: labB };
+  };
+
+  // Convert RGB to OKLab color space (more perceptually uniform than LAB)
+  const rgbToOklab = (r, g, b) => {
+    // Convert to linear RGB
+    const toLinear = (c) => {
+      c = c / 255;
+      return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    };
+
+    const lr = toLinear(r);
+    const lg = toLinear(g);
+    const lb = toLinear(b);
+
+    // Convert to LMS
+    const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+    const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+    const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+
+    // Convert to OKLab
+    return {
+      L: 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+      a: 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+      b: 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+    };
+  };
+
+  // CIEDE2000 color difference - most accurate perceptual color distance
+  const ciede2000 = (lab1, lab2) => {
+    const { l: L1, a: a1, b: b1 } = lab1;
+    const { l: L2, a: a2, b: b2 } = lab2;
+
+    const kL = 1, kC = 1, kH = 1;
+
+    const C1 = Math.sqrt(a1 * a1 + b1 * b1);
+    const C2 = Math.sqrt(a2 * a2 + b2 * b2);
+    const Cab = (C1 + C2) / 2;
+
+    const G = 0.5 * (1 - Math.sqrt(Math.pow(Cab, 7) / (Math.pow(Cab, 7) + Math.pow(25, 7))));
+
+    const a1p = a1 * (1 + G);
+    const a2p = a2 * (1 + G);
+
+    const C1p = Math.sqrt(a1p * a1p + b1 * b1);
+    const C2p = Math.sqrt(a2p * a2p + b2 * b2);
+
+    const h1p = Math.atan2(b1, a1p) * 180 / Math.PI;
+    const h2p = Math.atan2(b2, a2p) * 180 / Math.PI;
+
+    const h1pAdj = h1p < 0 ? h1p + 360 : h1p;
+    const h2pAdj = h2p < 0 ? h2p + 360 : h2p;
+
+    const dLp = L2 - L1;
+    const dCp = C2p - C1p;
+
+    let dhp;
+    if (C1p * C2p === 0) {
+      dhp = 0;
+    } else if (Math.abs(h2pAdj - h1pAdj) <= 180) {
+      dhp = h2pAdj - h1pAdj;
+    } else if (h2pAdj - h1pAdj > 180) {
+      dhp = h2pAdj - h1pAdj - 360;
+    } else {
+      dhp = h2pAdj - h1pAdj + 360;
+    }
+
+    const dHp = 2 * Math.sqrt(C1p * C2p) * Math.sin(dhp * Math.PI / 360);
+
+    const Lp = (L1 + L2) / 2;
+    const Cp = (C1p + C2p) / 2;
+
+    let Hp;
+    if (C1p * C2p === 0) {
+      Hp = h1pAdj + h2pAdj;
+    } else if (Math.abs(h1pAdj - h2pAdj) <= 180) {
+      Hp = (h1pAdj + h2pAdj) / 2;
+    } else if (h1pAdj + h2pAdj < 360) {
+      Hp = (h1pAdj + h2pAdj + 360) / 2;
+    } else {
+      Hp = (h1pAdj + h2pAdj - 360) / 2;
+    }
+
+    const T = 1 - 0.17 * Math.cos((Hp - 30) * Math.PI / 180)
+              + 0.24 * Math.cos(2 * Hp * Math.PI / 180)
+              + 0.32 * Math.cos((3 * Hp + 6) * Math.PI / 180)
+              - 0.20 * Math.cos((4 * Hp - 63) * Math.PI / 180);
+
+    const dTheta = 30 * Math.exp(-Math.pow((Hp - 275) / 25, 2));
+    const RC = 2 * Math.sqrt(Math.pow(Cp, 7) / (Math.pow(Cp, 7) + Math.pow(25, 7)));
+    const SL = 1 + (0.015 * Math.pow(Lp - 50, 2)) / Math.sqrt(20 + Math.pow(Lp - 50, 2));
+    const SC = 1 + 0.045 * Cp;
+    const SH = 1 + 0.015 * Cp * T;
+    const RT = -Math.sin(2 * dTheta * Math.PI / 180) * RC;
+
+    const dE = Math.sqrt(
+      Math.pow(dLp / (kL * SL), 2) +
+      Math.pow(dCp / (kC * SC), 2) +
+      Math.pow(dHp / (kH * SH), 2) +
+      RT * (dCp / (kC * SC)) * (dHp / (kH * SH))
+    );
+
+    return dE;
+  };
+
+  // OKLab color distance (simpler and faster than CIEDE2000, still perceptually accurate)
+  const oklabDistance = (rgb1, rgb2) => {
+    const ok1 = rgbToOklab(rgb1.r, rgb1.g, rgb1.b);
+    const ok2 = rgbToOklab(rgb2.r, rgb2.g, rgb2.b);
+
+    const dL = ok1.L - ok2.L;
+    const da = ok1.a - ok2.a;
+    const db = ok1.b - ok2.b;
+
+    return Math.sqrt(dL * dL + da * da + db * db);
   };
 
   // Advanced color validation with grayscale support
@@ -937,12 +1187,213 @@ const ImageColorAnalyzer = () => {
       extractWithOctree(imageSrc),
       extractWithWeightedKMeans(imageSrc)
     ]);
-    
+
     // Combine all colors and ensure unique palette
     const combined = [...vibrantColors, ...averageColor, ...kmeansColors, ...medianCutColors, ...octreeColors, ...weightedKmeansColors];
     const uniquePalette = ensureUniquePalette(combined, 6);
-    
+
     return uniquePalette;
+  };
+
+  // Highly accurate perceptual extraction using OKLab clustering with histogram analysis
+  const extractWithPerceptual = async (imageSrc) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Use higher resolution for accuracy
+        const maxSize = 500;
+        const scale = Math.min(maxSize / img.width, maxSize / img.height, 1);
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+
+        // Build color histogram in OKLab space with spatial weighting
+        const colorMap = new Map();
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const maxDist = Math.sqrt(centerX * centerX + centerY * centerY);
+
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const a = data[i + 3];
+
+          // Skip transparent pixels
+          if (a < 128) continue;
+
+          // Calculate spatial weight (center pixels more important)
+          const pixelIndex = i / 4;
+          const x = pixelIndex % canvas.width;
+          const y = Math.floor(pixelIndex / canvas.width);
+          const distFromCenter = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+          const spatialWeight = 1 - (distFromCenter / maxDist) * 0.3;
+
+          // Quantize to reduce unique colors (in OKLab space for perceptual uniformity)
+          const oklab = rgbToOklab(r, g, b);
+          // Quantize OKLab values
+          const qL = Math.round(oklab.L * 20) / 20;
+          const qa = Math.round(oklab.a * 40) / 40;
+          const qb = Math.round(oklab.b * 40) / 40;
+          const key = `${qL},${qa},${qb}`;
+
+          if (colorMap.has(key)) {
+            const entry = colorMap.get(key);
+            entry.count += spatialWeight;
+            entry.sumR += r * spatialWeight;
+            entry.sumG += g * spatialWeight;
+            entry.sumB += b * spatialWeight;
+          } else {
+            colorMap.set(key, {
+              count: spatialWeight,
+              sumR: r * spatialWeight,
+              sumG: g * spatialWeight,
+              sumB: b * spatialWeight,
+              oklab: oklab
+            });
+          }
+        }
+
+        // Convert to array and sort by frequency
+        let colorEntries = Array.from(colorMap.values())
+          .map(entry => ({
+            r: Math.round(entry.sumR / entry.count),
+            g: Math.round(entry.sumG / entry.count),
+            b: Math.round(entry.sumB / entry.count),
+            count: entry.count,
+            oklab: entry.oklab
+          }))
+          .sort((a, b) => b.count - a.count);
+
+        // K-means++ in OKLab space for final clustering
+        const k = 8;
+        const centroids = [];
+
+        // Initialize first centroid with highest frequency color
+        if (colorEntries.length > 0) {
+          centroids.push({ ...colorEntries[0].oklab });
+        }
+
+        // K-means++ initialization
+        for (let i = 1; i < k && i < colorEntries.length; i++) {
+          const distances = colorEntries.map(entry => {
+            let minDist = Infinity;
+            centroids.forEach(centroid => {
+              const dL = entry.oklab.L - centroid.L;
+              const da = entry.oklab.a - centroid.a;
+              const db = entry.oklab.b - centroid.b;
+              const dist = Math.sqrt(dL * dL + da * da + db * db);
+              minDist = Math.min(minDist, dist);
+            });
+            return minDist * minDist * entry.count; // Weight by frequency
+          });
+
+          const totalDist = distances.reduce((a, b) => a + b, 0);
+          let random = Math.random() * totalDist;
+          let idx = 0;
+          while (random > 0 && idx < distances.length - 1) {
+            random -= distances[idx];
+            idx++;
+          }
+          centroids.push({ ...colorEntries[idx].oklab });
+        }
+
+        // K-means iterations in OKLab space
+        for (let iter = 0; iter < 25; iter++) {
+          const clusters = Array(centroids.length).fill(null).map(() => ({
+            sumL: 0, suma: 0, sumb: 0, sumR: 0, sumG: 0, sumB: 0, totalWeight: 0
+          }));
+
+          // Assign colors to nearest centroid
+          colorEntries.forEach(entry => {
+            let minDist = Infinity;
+            let nearest = 0;
+
+            centroids.forEach((centroid, i) => {
+              const dL = entry.oklab.L - centroid.L;
+              const da = entry.oklab.a - centroid.a;
+              const db = entry.oklab.b - centroid.b;
+              const dist = Math.sqrt(dL * dL + da * da + db * db);
+              if (dist < minDist) {
+                minDist = dist;
+                nearest = i;
+              }
+            });
+
+            const weight = entry.count;
+            clusters[nearest].sumL += entry.oklab.L * weight;
+            clusters[nearest].suma += entry.oklab.a * weight;
+            clusters[nearest].sumb += entry.oklab.b * weight;
+            clusters[nearest].sumR += entry.r * weight;
+            clusters[nearest].sumG += entry.g * weight;
+            clusters[nearest].sumB += entry.b * weight;
+            clusters[nearest].totalWeight += weight;
+          });
+
+          // Update centroids
+          let converged = true;
+          centroids.forEach((centroid, i) => {
+            if (clusters[i].totalWeight > 0) {
+              const newL = clusters[i].sumL / clusters[i].totalWeight;
+              const newa = clusters[i].suma / clusters[i].totalWeight;
+              const newb = clusters[i].sumb / clusters[i].totalWeight;
+
+              const change = Math.sqrt(
+                (centroid.L - newL) ** 2 +
+                (centroid.a - newa) ** 2 +
+                (centroid.b - newb) ** 2
+              );
+
+              if (change > 0.001) converged = false;
+
+              centroid.L = newL;
+              centroid.a = newa;
+              centroid.b = newb;
+              centroid.r = Math.round(clusters[i].sumR / clusters[i].totalWeight);
+              centroid.g = Math.round(clusters[i].sumG / clusters[i].totalWeight);
+              centroid.b_rgb = Math.round(clusters[i].sumB / clusters[i].totalWeight);
+              centroid.weight = clusters[i].totalWeight;
+            }
+          });
+
+          if (converged) break;
+        }
+
+        // Convert to hex and filter
+        const colors = centroids
+          .filter(c => c.weight > 0 && !isNaN(c.r))
+          .sort((a, b) => b.weight - a.weight)
+          .map(c => {
+            const r = Math.max(0, Math.min(255, c.r));
+            const g = Math.max(0, Math.min(255, c.g));
+            const b = Math.max(0, Math.min(255, c.b_rgb));
+            return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+          })
+          .filter(color => isValidColor(color));
+
+        // Use CIEDE2000 for final deduplication
+        const finalColors = [];
+        for (const color of colors) {
+          const isTooSimilar = finalColors.some(existing =>
+            colorDistance(color, existing, true) < 8
+          );
+          if (!isTooSimilar) {
+            finalColors.push(color);
+          }
+          if (finalColors.length >= 6) break;
+        }
+
+        const uniquePalette = ensureUniquePalette(finalColors, 6);
+        resolve(uniquePalette);
+      };
+      img.src = imageSrc;
+    });
   };
 
   const handleImageUpload = useCallback(async (event) => {
@@ -984,6 +1435,9 @@ const ImageColorAnalyzer = () => {
           
           try {
             switch (extractionMethod) {
+              case 'perceptual':
+                extractedColors = await extractWithPerceptual(processedImage);
+                break;
               case 'vibrant':
                 extractedColors = await extractWithVibrant(processedImage);
                 break;
@@ -1006,7 +1460,7 @@ const ImageColorAnalyzer = () => {
                 extractedColors = await extractWithCombined(processedImage);
                 break;
               default:
-                extractedColors = await extractWithVibrant(processedImage);
+                extractedColors = await extractWithPerceptual(processedImage);
                 }
           } catch (extractionError) {
             console.error('Extraction method failed, trying fallback:', extractionError);
@@ -1017,9 +1471,10 @@ const ImageColorAnalyzer = () => {
           console.log('Colors extracted:', extractedColors);
 
               setColorPalette(extractedColors);
-          
+
           // Hide controls after successful extraction
           setShowControls(false);
+          setShowPaletteTools(true); // Auto-show tools
           
           // Save to color history
           const historyEntry = {
@@ -1074,6 +1529,34 @@ const ImageColorAnalyzer = () => {
     }
   }, [processImageFile]);
 
+  // Listen for Ctrl+V paste anywhere on page
+  useEffect(() => {
+    const handlePaste = async (e) => {
+      // Only handle if we're in the upload state
+      if (!showControls || selectedImage || colorPalette.length > 0) return;
+
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            await processImageFile(file);
+            toast.success('Image pasted!', {
+              icon: '📋',
+              style: { borderRadius: '10px', background: '#333', color: '#fff' },
+            });
+          }
+          return;
+        }
+      }
+    };
+
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [showControls, selectedImage, colorPalette.length, processImageFile]);
 
   const copyToClipboard = (color) => {
     const formattedColor = formatColor(color, colorFormat);
@@ -1146,8 +1629,8 @@ const ImageColorAnalyzer = () => {
     <div className="color-extractor-page">
       {/* Back to Home Button - Top Left */}
       <div className="fixed top-4 left-4 z-50">
-        <Link 
-          to="/" 
+        <Link
+          to="/"
           className="bg-white/20 backdrop-blur-md text-white hover:text-indigo-300 font-medium flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 hover:bg-white/30"
         >
           ← Back to Home
@@ -1155,152 +1638,118 @@ const ImageColorAnalyzer = () => {
       </div>
 
     <div className="image-color-analyzer">
-      <div className="flex items-center justify-between mb-3">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
         <h1 className="title mb-0">Color Extractor</h1>
-        {!showControls && (
+        {colorPalette.length > 0 && (
           <button
-            onClick={() => { setShowControls(true); setSelectedImage(null); setColorPalette([]); setColorAnalysis(null); }}
+            onClick={() => { setShowControls(true); setSelectedImage(null); setColorPalette([]); setColorAnalysis(null); setShowPaletteTools(false); setShowUIPreview(false); }}
             className="inline-flex items-center gap-2 text-xs sm:text-sm bg-indigo-600 text-white px-3 py-2 rounded-lg font-medium hover:bg-indigo-500 transition-colors duration-200"
             title="Extract another image"
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12,4V1L8,5L12,9V6A6,6 0 0,1 18,12A6,6 0 0,1 12,18A6,6 0 0,1 6,12H4A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4Z"/></svg>
-            Extract Again
+            New Extraction
           </button>
         )}
       </div>
-      
-      {/* Controls Panel - Only show when showControls is true */}
-      {showControls && (
-        <div className="controls-panel">
-        {/* Extraction Method Selector */}
-        <div className="control-group">
-          <label htmlFor="extractionMethod" className="control-label">
-            Extraction Method:
-          </label>
-          <select
-            id="extractionMethod"
-            value={extractionMethod}
-            onChange={(e) => setExtractionMethod(e.target.value)}
-            className="control-select"
+
+      {/* Two Column Layout */}
+      <div className={`flex flex-col ${colorPalette.length > 0 ? 'lg:flex-row' : ''} gap-6`}>
+
+        {/* ============ LEFT COLUMN: Extraction ============ */}
+        <div className={`${colorPalette.length > 0 ? 'lg:w-2/5 lg:flex-shrink-0' : 'w-full max-w-xl mx-auto'}`}>
+
+      {/* ============ CLEAN UPLOAD STATE ============ */}
+      {showControls && !selectedImage && (
+        <div className="space-y-6">
+          {/* Hero Upload Area */}
+          <motion.div
+            className={`upload-area ${isDragOver ? 'drag-over' : ''}`}
+            whileHover={{ scale: 1.01 }}
+            whileTap={{ scale: 0.99 }}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
           >
-            <option value="vibrant">Vibrant (Enhanced)</option>
-            <option value="fast-average">Fast Average</option>
-            <option value="kmeans">K-Means Clustering</option>
-            <option value="median-cut">Median-Cut Algorithm</option>
-            <option value="octree">Octree Quantization</option>
-            <option value="weighted-kmeans">Weighted K-Means</option>
-            <option value="combined">Combined (All Algorithms)</option>
-          </select>
-        </div>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              className="hidden"
+              id="imageUpload"
+              disabled={isProcessing}
+            />
+            <label htmlFor="imageUpload" className="upload-label cursor-pointer">
+              <div className="text-5xl mb-4">
+                {isProcessing ? "⏳" : "🎨"}
+              </div>
+              <p className="text-gray-700 font-medium text-lg mb-1">
+                {isProcessing ? "Extracting colors..." : isDragOver ? "Drop it here!" : "Drop an image here"}
+              </p>
+              <p className="text-gray-400 text-sm">or click to browse</p>
+              {isProcessing && (
+                <div className="w-48 bg-gray-200 rounded-full h-1.5 mt-4">
+                  <div
+                    className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${loadingProgress}%` }}
+                  />
+                </div>
+              )}
+            </label>
+          </motion.div>
 
-        {/* Color Format Selector */}
-        <div className="control-group">
-          <label htmlFor="colorFormat" className="control-label">
-            Color Format:
-          </label>
-          <select
-            id="colorFormat"
-            value={colorFormat}
-            onChange={(e) => setColorFormat(e.target.value)}
-            className="control-select"
+          {/* Paste Button */}
+          <button
+            onClick={pasteFromClipboard}
+            disabled={isPasting}
+            className="w-full py-3 px-4 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl text-gray-600 font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            <option value="hex">HEX</option>
-            <option value="rgb">RGB</option>
-            <option value="hsl">HSL</option>
-          </select>
-        </div>
+            {isPasting ? (
+              <>
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                Pasting...
+              </>
+            ) : (
+              <>
+                <span>📋</span>
+                Paste from clipboard
+                <span className="text-xs text-gray-400 ml-1">(Ctrl+V)</span>
+              </>
+            )}
+          </button>
 
-        {/* Preprocessing Options */}
-        <div className="control-group">
-          <label className="control-label">Image Preprocessing:</label>
-          <div className="checkbox-group">
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={preprocessingOptions.resize}
-                onChange={(e) => setPreprocessingOptions(prev => ({ ...prev, resize: e.target.checked }))}
-              />
-              Resize for performance
-            </label>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={preprocessingOptions.blur}
-                onChange={(e) => setPreprocessingOptions(prev => ({ ...prev, blur: e.target.checked }))}
-              />
-              Apply blur
-            </label>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={preprocessingOptions.contrast}
-                onChange={(e) => setPreprocessingOptions(prev => ({ ...prev, contrast: e.target.checked }))}
-              />
-              Enhance contrast
-            </label>
-          </div>
-        </div>
-
-        {/* Display Options */}
-        <div className="control-group">
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={showHexCodes}
-              onChange={(e) => setShowHexCodes(e.target.checked)}
-            />
-            Show color codes
-          </label>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={showColorAnalysis}
-              onChange={(e) => setShowColorAnalysis(e.target.checked)}
-            />
-            Show color analysis
-          </label>
-        </div>
-        </div>
-      )}
-
-      {/* (removed center Extract Again; now in header) */}
-
-      {!selectedImage && (
-      <motion.div
-          className={`upload-area ${isDragOver ? 'border-indigo-500 bg-indigo-50' : ''}`}
-        whileHover={{ scale: 1.02 }}
-        whileTap={{ scale: 0.98 }}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-      >
-        <input
-          type="file"
-          accept="image/*"
-          onChange={handleImageUpload}
-          className="hidden"
-          id="imageUpload"
-          disabled={isProcessing}
-          aria-label="Upload image for color extraction"
-          aria-describedby="file-help"
-        />
-        <label htmlFor="imageUpload" className="upload-label">
-          <div className="upload-icon">
-            {isProcessing ? "⏳" : "🎨"}
-          </div>
-            <p>{isProcessing ? "Processing colors..." : isDragOver ? "Drop your image here!" : "Drop your image here or click to browse"}</p>
-          <p className="file-types" id="file-help">Supports JPG, PNG, SVG</p>
-          {isProcessing && (
-            <div className="w-full bg-gray-200 rounded-full h-2 mt-4">
-              <div 
-                className="bg-indigo-600 h-2 rounded-full transition-all duration-300 ease-out"
-                style={{ width: `${loadingProgress}%` }}
-              ></div>
+          {/* Minimal Settings Row */}
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
+            <div className="flex items-center gap-4">
+              <select
+                value={extractionMethod}
+                onChange={(e) => setExtractionMethod(e.target.value)}
+                className="text-sm bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="perceptual">Perceptual</option>
+                <option value="vibrant">Vibrant</option>
+                <option value="kmeans">K-Means</option>
+                <option value="combined">Combined</option>
+              </select>
+              <select
+                value={colorFormat}
+                onChange={(e) => setColorFormat(e.target.value)}
+                className="text-sm bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="hex">HEX</option>
+                <option value="rgb">RGB</option>
+                <option value="hsl">HSL</option>
+              </select>
             </div>
-          )}
-        </label>
-      </motion.div>
+            <span className="text-xs text-gray-400">JPG, PNG, SVG</span>
+          </div>
+        </div>
       )}
+
+      {/* Image Preview */}
       {selectedImage && (
         <motion.img
           src={selectedImage}
@@ -1308,7 +1757,7 @@ const ImageColorAnalyzer = () => {
           className="uploaded-image"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
+          transition={{ duration: 0.3 }}
         />
       )}
       {colorPalette.length > 0 ? (
@@ -1396,12 +1845,8 @@ const ImageColorAnalyzer = () => {
             </div>
           )}
         </div>
-      ) : selectedImage && !isProcessing && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center py-12"
-        >
+      ) : selectedImage && !isProcessing ? (
+        <div className="text-center py-12">
           <div className="text-6xl mb-4">🎨</div>
           <h3 className="text-xl font-semibold text-gray-700 mb-2">No Colors Found</h3>
           <p className="text-gray-500 mb-4">Try a different image or extraction method</p>
@@ -1416,8 +1861,360 @@ const ImageColorAnalyzer = () => {
           >
             Try Another Image
           </button>
-        </motion.div>
-      )}
+        </div>
+      ) : null}
+
+        </div>
+        {/* ============ END LEFT COLUMN ============ */}
+
+        {/* ============ RIGHT COLUMN: Tools & Preview ============ */}
+        {colorPalette.length > 0 && (
+        <div className="lg:w-3/5 lg:flex-grow tools-panel-sticky space-y-4">
+
+          {/* Feature Toggle Tabs */}
+          <div className="bg-gray-100 p-1 rounded-xl inline-flex gap-1">
+            <button
+              onClick={() => { setShowPaletteTools(true); setShowUIPreview(false); }}
+              className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${showPaletteTools ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+            >
+              🎛️ Palette Tools
+            </button>
+            <button
+              onClick={() => { setShowUIPreview(true); setShowPaletteTools(false); }}
+              className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${showUIPreview ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+            >
+              👁️ UI Preview
+            </button>
+          </div>
+
+          {/* ============ PALETTE MANIPULATION TOOLS ============ */}
+          {showPaletteTools && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              transition={{ duration: 0.2 }}
+              className="space-y-4"
+            >
+              {/* Palette Adjustments */}
+              <div className="tool-card">
+                <h5 className="text-gray-800 font-semibold text-sm mb-4 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-md bg-indigo-100 flex items-center justify-center text-xs">🎚️</span>
+                  Adjust Palette
+                </h5>
+                <div className="grid gap-5">
+                  <div>
+                    <label className="text-gray-600 text-sm font-medium flex justify-between mb-2">
+                      <span>Saturation</span>
+                      <span className="text-indigo-600 font-semibold">{paletteAdjustments.saturation > 0 ? '+' : ''}{paletteAdjustments.saturation}%</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="-50"
+                      max="50"
+                      value={paletteAdjustments.saturation}
+                      onChange={(e) => setPaletteAdjustments(prev => ({ ...prev, saturation: parseInt(e.target.value) }))}
+                      className="w-full accent-indigo-600 h-2 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-600 text-sm font-medium flex justify-between mb-2">
+                      <span>Brightness</span>
+                      <span className="text-indigo-600 font-semibold">{paletteAdjustments.brightness > 0 ? '+' : ''}{paletteAdjustments.brightness}%</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="-50"
+                      max="50"
+                      value={paletteAdjustments.brightness}
+                      onChange={(e) => setPaletteAdjustments(prev => ({ ...prev, brightness: parseInt(e.target.value) }))}
+                      className="w-full accent-indigo-600 h-2 rounded-lg"
+                    />
+                  </div>
+                </div>
+
+                {/* Adjusted Palette Preview */}
+                {(paletteAdjustments.saturation !== 0 || paletteAdjustments.brightness !== 0) && (
+                  <div className="mt-5 pt-4 border-t border-gray-100">
+                    <p className="text-gray-600 text-sm font-medium mb-3">Adjusted Preview:</p>
+                    <div className="flex gap-2">
+                      {getAdjustedPalette().map((color, i) => (
+                        <div
+                          key={i}
+                          className="w-10 h-10 rounded-lg cursor-pointer hover:scale-110 transition-transform shadow-sm"
+                          style={{ backgroundColor: color }}
+                          onClick={() => copyToClipboard(color)}
+                          title={color}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => {
+                        setColorPalette(getAdjustedPalette());
+                        setPaletteAdjustments({ saturation: 0, brightness: 0 });
+                        toast.success('Adjustments applied!', { icon: '✅' });
+                      }}
+                      className="mt-3 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-500 transition-colors shadow-sm"
+                    >
+                      Apply Adjustments
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Tints & Shades */}
+              <div className="tool-card">
+                <h5 className="text-gray-800 font-semibold text-sm mb-3 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-md bg-purple-100 flex items-center justify-center text-xs">🎨</span>
+                  Tints & Shades
+                </h5>
+                <p className="text-gray-500 text-xs mb-3">Click a color to generate its scale</p>
+                <div className="flex gap-2 flex-wrap">
+                  {colorPalette.map((color, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setSelectedColorForTools(selectedColorForTools === color ? null : color)}
+                      className={`w-12 h-12 rounded-lg transition-all shadow-sm ${selectedColorForTools === color ? 'ring-2 ring-indigo-500 ring-offset-2 scale-110' : 'hover:scale-105'}`}
+                      style={{ backgroundColor: color }}
+                      title={`Generate tints/shades for ${color}`}
+                    />
+                  ))}
+                </div>
+
+                {selectedColorForTools && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200"
+                  >
+                    <p className="text-gray-600 text-sm font-medium mb-3">Color Scale for <span className="font-mono text-indigo-600">{selectedColorForTools}</span></p>
+                    <div className="flex gap-1">
+                      {generateColorScale(selectedColorForTools).map((scaleColor, i) => (
+                        <div
+                          key={i}
+                          className={`flex-1 h-12 cursor-pointer hover:scale-y-110 transition-transform rounded ${i === 4 ? 'ring-2 ring-indigo-500' : ''}`}
+                          style={{ backgroundColor: scaleColor }}
+                          onClick={() => copyToClipboard(scaleColor)}
+                          title={scaleColor}
+                        />
+                      ))}
+                    </div>
+                    <p className="text-gray-400 text-xs mt-2 text-center font-medium">← Darker | Original | Lighter →</p>
+                  </motion.div>
+                )}
+              </div>
+
+              {/* Gradient Generator */}
+              <div className="tool-card">
+                <h5 className="text-gray-800 font-semibold text-sm mb-3 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-md bg-gradient-to-r from-pink-100 to-purple-100 flex items-center justify-center text-xs">🌈</span>
+                  Gradients
+                </h5>
+                <div
+                  className="h-16 rounded-lg cursor-pointer hover:scale-[1.02] transition-transform shadow-sm"
+                  style={{ background: createPaletteGradient(colorPalette) }}
+                  onClick={() => {
+                    navigator.clipboard.writeText(createPaletteGradient(colorPalette));
+                    toast.success('Gradient CSS copied!', { icon: '🎨' });
+                  }}
+                  title="Click to copy gradient CSS"
+                />
+                <p className="text-gray-400 text-xs mt-2">Click to copy CSS</p>
+
+                {/* Individual Gradients */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
+                  {colorPalette.slice(0, -1).map((color, i) => (
+                    <div
+                      key={i}
+                      className="h-8 rounded-lg cursor-pointer hover:scale-105 transition-transform"
+                      style={{ background: createGradient(color, colorPalette[i + 1]) }}
+                      onClick={() => {
+                        navigator.clipboard.writeText(createGradient(color, colorPalette[i + 1]));
+                        toast.success('Gradient copied!', { icon: '🎨' });
+                      }}
+                      title={`${color} → ${colorPalette[i + 1]}`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+            </motion.div>
+          )}
+
+          {/* ============ LIVE UI PREVIEW ============ */}
+          {showUIPreview && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              transition={{ duration: 0.2 }}
+              className="tool-card !p-0 overflow-hidden"
+            >
+              <div className="flex items-center justify-between p-4 border-b border-gray-100">
+                <h4 className="text-gray-800 font-semibold text-sm flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-md bg-blue-100 flex items-center justify-center text-xs">👁️</span>
+                  Live Preview
+                </h4>
+                <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+                  <button
+                    onClick={() => setPreviewMode('light')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${previewMode === 'light' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  >
+                    ☀️ Light
+                  </button>
+                  <button
+                    onClick={() => setPreviewMode('dark')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${previewMode === 'dark' ? 'bg-gray-800 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  >
+                    🌙 Dark
+                  </button>
+                </div>
+              </div>
+
+              {/* UI Preview Container */}
+              <div
+                className="ui-preview-container"
+                style={{
+                  backgroundColor: previewMode === 'light' ? '#ffffff' : '#1a1a2e',
+                  color: previewMode === 'light' ? '#1a1a2e' : '#ffffff'
+                }}
+              >
+                {/* Mock Navbar */}
+                <nav
+                  className="px-4 py-3 flex items-center justify-between"
+                  style={{ backgroundColor: colorPalette[0] || '#6366f1' }}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg" style={{ backgroundColor: colorPalette[1] || '#ffffff' }}></div>
+                    <span className="font-bold text-white">Brand</span>
+                  </div>
+                  <div className="flex gap-4">
+                    <span className="text-white/80 text-sm cursor-pointer hover:text-white">Home</span>
+                    <span className="text-white/80 text-sm cursor-pointer hover:text-white">About</span>
+                    <span className="text-white/80 text-sm cursor-pointer hover:text-white">Contact</span>
+                  </div>
+                </nav>
+
+                {/* Content Area */}
+                <div className="p-6">
+                  {/* Hero Section */}
+                  <div className="text-center mb-6">
+                    <h2 className="text-2xl font-bold mb-2" style={{ color: colorPalette[0] || '#6366f1' }}>
+                      Welcome to Your Site
+                    </h2>
+                    <p className="text-sm opacity-70 mb-4">
+                      This is a preview of how your palette looks on a real UI
+                    </p>
+                    <div className="flex gap-2 justify-center">
+                      <button
+                        className="px-4 py-2 rounded-lg text-white font-medium text-sm"
+                        style={{ backgroundColor: colorPalette[0] || '#6366f1' }}
+                      >
+                        Primary Button
+                      </button>
+                      <button
+                        className="px-4 py-2 rounded-lg font-medium text-sm border-2"
+                        style={{
+                          borderColor: colorPalette[1] || '#6366f1',
+                          color: colorPalette[1] || '#6366f1',
+                          backgroundColor: 'transparent'
+                        }}
+                      >
+                        Secondary
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Cards */}
+                  <div className="grid grid-cols-3 gap-3">
+                    {colorPalette.slice(0, 3).map((color, i) => (
+                      <div
+                        key={i}
+                        className="rounded-lg overflow-hidden"
+                        style={{
+                          backgroundColor: previewMode === 'light' ? '#f8f9fa' : '#2a2a3e',
+                          border: `1px solid ${previewMode === 'light' ? '#e5e7eb' : '#3a3a4e'}`
+                        }}
+                      >
+                        <div className="h-16" style={{ backgroundColor: color }}></div>
+                        <div className="p-3">
+                          <div className="text-xs font-semibold mb-1" style={{ color: color }}>
+                            Card {i + 1}
+                          </div>
+                          <div className="text-xs opacity-60">
+                            Sample card content
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Tags/Badges */}
+                  <div className="flex gap-2 mt-4 justify-center flex-wrap">
+                    {colorPalette.map((color, i) => (
+                      <span
+                        key={i}
+                        className="px-2 py-1 rounded text-xs font-medium text-white"
+                        style={{ backgroundColor: color }}
+                      >
+                        Tag {i + 1}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Form Elements */}
+                  <div className="mt-4 max-w-xs mx-auto">
+                    <input
+                      type="text"
+                      placeholder="Sample input..."
+                      className="w-full px-3 py-2 rounded-lg text-sm mb-2"
+                      style={{
+                        backgroundColor: previewMode === 'light' ? '#ffffff' : '#2a2a3e',
+                        border: `2px solid ${colorPalette[2] || '#e5e7eb'}`,
+                        color: previewMode === 'light' ? '#1a1a2e' : '#ffffff'
+                      }}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        className="flex-1 px-3 py-2 rounded-lg text-white text-sm font-medium"
+                        style={{ backgroundColor: colorPalette[0] || '#6366f1' }}
+                      >
+                        Submit
+                      </button>
+                      <button
+                        className="flex-1 px-3 py-2 rounded-lg text-sm font-medium"
+                        style={{
+                          backgroundColor: colorPalette[3] || '#e5e7eb',
+                          color: previewMode === 'light' ? '#1a1a2e' : '#ffffff'
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <footer
+                  className="px-4 py-3 text-center text-xs"
+                  style={{
+                    backgroundColor: colorPalette[5] || colorPalette[0] || '#6366f1',
+                    color: '#ffffff'
+                  }}
+                >
+                  © 2024 Your Brand. Built with your color palette.
+                </footer>
+              </div>
+            </motion.div>
+          )}
+
+        </div>
+        )}
+        {/* ============ END RIGHT COLUMN ============ */}
+
+      </div>
+      {/* End Two Column Layout */}
+
       </div>
     </div>
   );
